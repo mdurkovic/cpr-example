@@ -29,8 +29,21 @@ else()
     endif()
 endif()
 
+set(SRCS example.cpp)
+
 add_subdirectory(opt)
 
-add_executable(example example.cpp)
-target_link_libraries(example ${CPR_LIBRARIES})
-include_directories(${CPR_INCLUDE_DIRS} ${JSON_INCLUDE_DIRS})
+add_subdirectory(cache)
+
+find_package(Boost REQUIRED COMPONENTS filesystem system serialization)
+
+add_executable(example ${HDRS} ${SRCS})
+
+target_link_libraries(example
+                      ${CPR_LIBRARIES}
+                      ${Boost_LIBRARIES})
+
+include_directories(${CPR_INCLUDE_DIRS}
+                    ${JSON_INCLUDE_DIRS}
+                    ${Boost_INCLUDE_DIR})
+

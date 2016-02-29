@@ -51,18 +51,23 @@ make_validation_request(const Era::Common::Repository::Http::CRequest &request,
     return validation_request;
 }
 
-void validate(Era::Common::Repository::Http::CCache &cache,
-              const Era::Common::Repository::Http::CRequest &request,
-              Era::Common::Repository::Http::CCachedResponse &cached_response)
+cpr::Response
+validate(cpr::Session &session,
+         Era::Common::Repository::Http::CCache &cache,
+         const Era::Common::Repository::Http::CRequest &request,
+         Era::Common::Repository::Http::CCachedResponse &cached_response)
 {
     using namespace Era::Common::Repository;
 
     auto validation_request = make_validation_request(request, cached_response);
     validation_request.header["Connection"] = "Keep-Alive";
 
-    auto validation_response = cpr::Get( validation_request.url,
-                                         validation_request.header,
-                                         validation_request.parameters );
+    cpr::priv::set_option(session,
+                          validation_request.url,
+                          validation_request.header,
+                          validation_request.parameters);
+
+    auto validation_response = session.Get();
 
     if ( 304 == validation_response.status_code ) {
         std::cout << "Resource not modified: " << request.url << std::endl;
@@ -92,6 +97,47 @@ void validate(Era::Common::Repository::Http::CCache &cache,
         //print_response(validation_response);
 
         cache.Delete(request);
+    }
+}
+
+cpr::Response get_with_cache(cpr::Session &session,
+                             Era::Common::Repository::Http::CCache &cache,
+                             const Era::Common::Repository::Http::CRequest &request)
+{
+    using namespace Era::Common::Repository;
+
+    auto cached_response_opt = cache.Match(request);
+    if (cached_response_opt)
+    {
+        auto &cached_response = cached_response_opt.get();
+
+        if (Http::CacheUtils::is_response_stale(cached_response))
+        {
+            return validate(session, cache, request, cached_response);
+        }
+        else
+        {
+            std::cout << "Cached resource: " << request.url << std::endl;
+            return cached_response.original();
+        }
+    }
+    else {
+        cpr::priv::set_option(session, request.url,
+                                       cpr::Header{ { "Connection", "Keep-Alive" } } );
+        auto response = session.Get();
+
+        if ( 200 == response.status_code ) {
+            std::cout << "New resource: " << request.url << std::endl;
+            //print_response(response);
+
+            cache.Put(request, response);
+        }
+        else {
+            std::cout << "Invalid resource: " << request.url << std::endl;
+            //print_response(response);
+        }
+
+        return response;
     }
 }
 
@@ -129,37 +175,7 @@ int main(int argc, char** argv) {
     auto start_stamp = std::chrono::system_clock::now();
     for (auto &request : requests)
     {
-        auto cached_response_opt = cache.Match(request);
-        if (cached_response_opt)
-        {
-            auto &cached_response = cached_response_opt.get();
-
-            if (Http::CacheUtils::is_response_stale(cached_response))
-            {
-                validate(cache, request, cached_response);
-            }
-            else
-            {
-                std::cout << "Cached resource: " << request.url << std::endl;
-                //print_response(cached_response.original());
-            }
-        }
-        else {
-            cpr::priv::set_option(session, request.url,
-                                           cpr::Header{ { "Connection", "Keep-Alive" } } );
-            auto response = session.Get();
-
-            if ( 200 == response.status_code ) {
-                std::cout << "New resource: " << request.url << std::endl;
-                //print_response(response);
-
-                cache.Put(request, response);
-            }
-            else {
-                std::cout << "Invalid resource: " << request.url << std::endl;
-                //print_response(response);
-            }
-        }
+        get_with_cache(session, cache, request);
     }
     auto end_stamp = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_stamp - start_stamp);

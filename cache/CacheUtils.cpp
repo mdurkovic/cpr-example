@@ -18,6 +18,7 @@ namespace Era { namespace Common { namespace Repository { namespace Http { names
 
 
 CCacheControl::CCacheControl(const std::string &spec)
+    : flags_(0)
 {
     std::vector<std::string> tokens;
     boost::algorithm::split(tokens, spec,

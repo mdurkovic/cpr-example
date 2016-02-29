@@ -6,6 +6,8 @@
 #include "cache/Cache.h"
 #include "cache/CacheUtils.h"
 
+#include <boost/filesystem.hpp>
+
 template<typename T>
 void print_response(const T &response)
 {
@@ -30,6 +32,11 @@ void print_response(const T &response)
     }
 }
 
+namespace Era {
+namespace Common {
+namespace Repository {
+namespace Http {
+
 Era::Common::Repository::Http::CRequest
 make_validation_request(const Era::Common::Repository::Http::CRequest &request,
                         const Era::Common::Repository::Http::CCachedResponse &cached_response)
@@ -52,6 +59,16 @@ make_validation_request(const Era::Common::Repository::Http::CRequest &request,
 }
 
 cpr::Response
+Get(cpr::Session &session, const CRequest &request)
+{
+    cpr::priv::set_option(session,
+                          request.url,
+                          request.header,
+                          request.parameters);
+    return session.Get();
+}
+
+cpr::Response
 validate(cpr::Session &session,
          Era::Common::Repository::Http::CCache &cache,
          const Era::Common::Repository::Http::CRequest &request,
@@ -62,12 +79,7 @@ validate(cpr::Session &session,
     auto validation_request = make_validation_request(request, cached_response);
     validation_request.header["Connection"] = "Keep-Alive";
 
-    cpr::priv::set_option(session,
-                          validation_request.url,
-                          validation_request.header,
-                          validation_request.parameters);
-
-    auto validation_response = session.Get();
+    auto validation_response = Http::Get(session, validation_request);
 
     if ( 304 == validation_response.status_code ) {
         std::cout << "Resource not modified: " << request.url << std::endl;
@@ -100,9 +112,8 @@ validate(cpr::Session &session,
     }
 }
 
-cpr::Response get_with_cache(cpr::Session &session,
-                             Era::Common::Repository::Http::CCache &cache,
-                             const Era::Common::Repository::Http::CRequest &request)
+cpr::Response
+Get(cpr::Session &session, CCache &cache, const CRequest &request)
 {
     using namespace Era::Common::Repository;
 
@@ -121,18 +132,20 @@ cpr::Response get_with_cache(cpr::Session &session,
             return cached_response.original();
         }
     }
-    else {
-        cpr::priv::set_option(session, request.url,
-                                       cpr::Header{ { "Connection", "Keep-Alive" } } );
-        auto response = session.Get();
+    else
+    {
+        auto new_request(request);
+        new_request.header["Connection"] = "Keep-Alive";
+
+        auto response = Http::Get(session, new_request);
 
         if ( 200 == response.status_code ) {
-            std::cout << "New resource: " << request.url << std::endl;
+            std::cout << "New resource: " << new_request.url << std::endl;
             //print_response(response);
 
             if (Http::CacheUtils::is_response_cacheable(response))
             {
-                cache.Put(request, response);
+                cache.Put(new_request, response);
             }
         }
         else {
@@ -144,10 +157,10 @@ cpr::Response get_with_cache(cpr::Session &session,
     }
 }
 
+}}}} // namespace Era::Common::Repository::Http;
+
 int main(int argc, char** argv) {
     using namespace Era::Common::Repository;
-
-    Http::CCache cache("/tmp/httpcache");
 
     std::vector<Http::CRequest> requests = {
         Http::MakeRequest( cpr::Url{"http://repository.eset.com/v1/info.meta"} ),
@@ -173,15 +186,27 @@ int main(int argc, char** argv) {
         Http::MakeRequest( cpr::Url{"http://repository.eset.com/v1/com/eset/apps/business/era/vah/metadata"} )*/
     };
 
+    boost::filesystem::path path("/tmp/httpcache");
+
+    boost::system::error_code ec;
+    boost::filesystem::remove_all(path, ec);
+
+    Http::CCache cache(path);
+
     cpr::Session session;
 
-    auto start_stamp = std::chrono::system_clock::now();
-    for (auto &request : requests)
-    {
-        get_with_cache(session, cache, request);
-    }
-    auto end_stamp = std::chrono::system_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_stamp - start_stamp);
+    auto start = std::chrono::system_clock::now();
+    for (auto &request : requests) Http::Get(session, cache, request);
 
-    std::cout << "Sync took " << duration.count() << " milliseconds" << std::endl;
+    auto fresh_sync = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start);
+
+    start = std::chrono::system_clock::now();
+    for (auto &request : requests) Http::Get(session, cache, request);
+
+    auto cached_sync = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start);
+
+    auto ratio = 100. * cached_sync.count() / fresh_sync.count();
+
+    std::cout << "Fresh sync: " << fresh_sync.count() << " ms; ";
+    std::cout << "Cached sync: " << cached_sync.count() << " ms (" << ratio << "%)" << std::endl;
 }

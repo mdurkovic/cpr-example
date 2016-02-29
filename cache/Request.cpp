@@ -16,9 +16,16 @@ namespace Common {
 namespace Repository {
 namespace Http {
 
+std::string request_compare_key(const CRequest &req)
+{
+    auto user_agent = req.header.find("User-Agent");
+    return req.url + req.parameters.content + (user_agent != req.header.end() ? user_agent->second : std::string());
+}
+
 bool operator <(const CRequest& r1, const CRequest& r2)
 {
-    return boost::lexicographical_compare(r1.url, r2.url);
+    return boost::lexicographical_compare(request_compare_key(r1),
+                                          request_compare_key(r2));
 }
 
 CRequest &operator <<(CRequest &request, CRequest::header_t &&header)

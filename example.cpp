@@ -130,7 +130,10 @@ cpr::Response get_with_cache(cpr::Session &session,
             std::cout << "New resource: " << request.url << std::endl;
             //print_response(response);
 
-            cache.Put(request, response);
+            if (Http::CacheUtils::is_response_cacheable(response))
+            {
+                cache.Put(request, response);
+            }
         }
         else {
             std::cout << "Invalid resource: " << request.url << std::endl;

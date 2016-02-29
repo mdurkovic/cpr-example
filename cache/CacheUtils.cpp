@@ -130,7 +130,18 @@ is_response_stale(const CCachedResponse& cached_response)
 bool
 is_response_cacheable(const cpr::Response &response)
 {
-    return true;
+    if (200 == response.status_code)
+    {
+        auto cache_control = get_cache_control(response.header);
+        if (cache_control)
+        {
+            return !(cache_control->is_no_cache() || cache_control->is_no_store());
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
 }}}}} // namespace Era::Common::Repository::Http::CacheUtils
